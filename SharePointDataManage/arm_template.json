@@ -1,0 +1,193 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "workflows_SharePointDataManage_name": {
+            "defaultValue": "SharePointDataManage",
+            "type": "String"
+        },
+        "connections_sharepointonline_vh_externalid": {
+            "defaultValue": "/subscriptions/02b98042-1212-4509-8d49-0ba32945c9cd/resourceGroups/SUB2_HUB/providers/Microsoft.Web/connections/sharepointonline-vh",
+            "type": "String"
+        },
+        "connections_office365_1_externalid": {
+            "defaultValue": "/subscriptions/02b98042-1212-4509-8d49-0ba32945c9cd/resourceGroups/SUB2_HUB/providers/Microsoft.Web/connections/office365-1",
+            "type": "String"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('workflows_SharePointDataManage_name')]",
+            "location": "uksouth",
+            "tags": {
+                "department": "core-storage"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "recurrence": {
+                                "interval": 1,
+                                "frequency": "Day",
+                                "timeZone": "GMT Standard Time",
+                                "schedule": {
+                                    "hours": [
+                                        8
+                                    ],
+                                    "minutes": [
+                                        0
+                                    ]
+                                }
+                            },
+                            "evaluatedRecurrence": {
+                                "interval": 1,
+                                "frequency": "Day",
+                                "timeZone": "GMT Standard Time",
+                                "schedule": {
+                                    "hours": [
+                                        8
+                                    ],
+                                    "minutes": [
+                                        0
+                                    ]
+                                }
+                            },
+                            "type": "Recurrence"
+                        }
+                    },
+                    "actions": {
+                        "Get_files_(properties_only)": {
+                            "runAfter": {
+                                "Initialize_variables": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['sharepointonline']['connectionId']"
+                                    }
+                                },
+                                "method": "get",
+                                "path": "/datasets/@{encodeURIComponent(encodeURIComponent('https://sub2tech.sharepoint.com'))}/tables/@{encodeURIComponent(encodeURIComponent('9a005f76-4a52-4d15-a4ad-49b69b5c275b'))}/getfileitems",
+                                "queries": {
+                                    "$top": 100,
+                                    "viewScopeOption": "RecursiveAll"
+                                }
+                            },
+                            "operationOptions": "DisableAutomaticDecompression"
+                        },
+                        "Filter_array": {
+                            "runAfter": {
+                                "Get_files_(properties_only)": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@body('Get_files_(properties_only)')?['value']",
+                                "where": "@lessOrEquals(item()?['Modified'], addDays(utcNow(), -365))"
+                            }
+                        },
+                        "For_each": {
+                            "foreach": "@body('Filter_array')",
+                            "actions": {
+                                "Append_to_string_variable": {
+                                    "type": "AppendToStringVariable",
+                                    "inputs": {
+                                        "name": "MovedFiles",
+                                        "value": "@concat('<tr><td>', items('For_each')?['{FilenameWithExtension}'], '</td><td>', items('For_each')?['Modified'], '</td></tr>')\r\n\r\n"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "Filter_array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Foreach"
+                        },
+                        "Initialize_variables": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "MovedFiles",
+                                        "type": "string",
+                                        "value": "<table border='1' style='border-collapse:collapse'><tr><th>File Name</th><th>Modified Date</th></tr>"
+                                    }
+                                ]
+                            }
+                        },
+                        "Send_an_email_(V2)-copy": {
+                            "runAfter": {
+                                "Append_to_string_variable_1": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['office365']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "To": "vikramh@sub2tech.com; rogerw@sub2tech.com",
+                                    "Subject": "SharePoint Files To Move",
+                                    "Body": "<p class=\"editor-paragraph\">Hi Vikram,<br><br>Attached files are moved.</p><br><pre>@{variables('MovedFiles')}</pre><br><p class=\"editor-paragraph\"><br>Thanks,</p><p class=\"editor-paragraph\">Azure Logic App</p>",
+                                    "Importance": "Normal"
+                                },
+                                "path": "/v2/Mail"
+                            }
+                        },
+                        "Append_to_string_variable_1": {
+                            "runAfter": {
+                                "For_each": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "AppendToStringVariable",
+                            "inputs": {
+                                "name": "MovedFiles",
+                                "value": "</table>"
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "sharepointonline": {
+                                "id": "/subscriptions/02b98042-1212-4509-8d49-0ba32945c9cd/providers/Microsoft.Web/locations/uksouth/managedApis/sharepointonline",
+                                "connectionId": "[parameters('connections_sharepointonline_vh_externalid')]",
+                                "connectionName": "sharepointonline-vh"
+                            },
+                            "office365": {
+                                "id": "/subscriptions/02b98042-1212-4509-8d49-0ba32945c9cd/providers/Microsoft.Web/locations/uksouth/managedApis/office365",
+                                "connectionId": "[parameters('connections_office365_1_externalid')]",
+                                "connectionName": "office365-1"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}
